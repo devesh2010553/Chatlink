@@ -1,7 +1,7 @@
 {
-  "name": "chatroulette-app",
+  "name": "kineticcam",
   "version": "1.0.0",
-  "description": "Random video chat app like Omegle",
+  "description": "KineticCam free 1v1 random video chat PWA",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

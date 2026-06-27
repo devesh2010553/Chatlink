@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Chatlink — Random Video Chat</title>
+<title>KineticCam - Free 1v1 Video Chat with Free Gender Filter & Country Filter | Free Omegle Alternative</title>
+<meta name="description" content="KineticCam is a free 1v1 random video chat website with free gender filter, free country filter, text chat, fast next button and mobile PWA install support."/>
+<meta name="keywords" content="free 1v1 video chat, free gender filter video chat, free country filter video chat, free Omegle alternative, random video chat, stranger video chat, KineticCam"/>
+<meta name="robots" content="index, follow"/>
+<meta name="theme-color" content="#6c63ff"/>
+<meta name="google-site-verification" content="PASTE_YOUR_GOOGLE_SEARCH_CONSOLE_VERIFICATION_CODE_HERE"/>
+<link rel="canonical" href="/"/>
+<link rel="manifest" href="/manifest.json"/>
+<link rel="apple-touch-icon" href="/icons/icon-192.png"/>
 <style>
   :root {
     --bg: #0a0a0f;
@@ -379,16 +387,30 @@
   @keyframes fadeIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
 
   /* Responsive */
+  .feedback-float { position: fixed; right: 16px; bottom: 16px; z-index: 50; border: 1px solid var(--border); background: var(--surface2); color: var(--text); padding: 10px 14px; border-radius: 999px; cursor: pointer; box-shadow: 0 12px 28px rgba(0,0,0,.35); font-weight: 700; }
+  .feedback-modal { position: fixed; inset: 0; z-index: 120; background: rgba(0,0,0,.72); display: none; align-items: center; justify-content: center; padding: 18px; }
+  .feedback-box { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; display: grid; gap: 10px; }
+  .feedback-box input, .feedback-box textarea { width: 100%; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font: inherit; }
+  .feedback-actions { display:flex; gap:10px; justify-content:flex-end; }
+
   @media (max-width: 700px) {
-    .chat-panel { display: none; }
-    .videos { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    body { overflow: auto; height: auto; min-height: 100dvh; }
+    header { padding: 10px 12px; }
+    main { flex-direction: column; overflow: visible; min-height: calc(100dvh - 54px); }
+    .video-area { min-height: 64dvh; flex: unset; }
+    .videos { min-height: 64dvh; grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .chat-panel { display: flex; width: 100%; height: 36dvh; border-left: 0; border-top: 1px solid var(--border); }
+    .controls { bottom: 8px; flex-wrap: wrap; padding: 8px; }
+    .control-btn { padding: 9px 12px; min-width: 44px; }
+    .status-overlay { padding: 16px; overflow-y: auto; }
+    .feedback-float { bottom: calc(36dvh + 12px); right: 10px; padding: 8px 11px; font-size: .8rem; }
   }
 </style>
 </head>
 <body>
 
 <header>
-  <div class="logo">⚡ Chatlink</div>
+  <div class="logo">⚡ KineticCam</div>
   <div class="stats-bar">
     <span><span class="dot"></span><span id="onlineCount">0</span> online</span>
     <span>💬 <span id="chatsCount">0</span> chatting</span>
@@ -420,16 +442,16 @@
 
     <!-- Status Overlay -->
     <div class="status-overlay" id="statusOverlay">
-      <div class="status-title">Welcome to Chatlink</div>
-      <div class="status-sub">Random video chat with strangers worldwide. No registration required.</div>
+      <div class="status-title">Welcome to KineticCam</div>
+      <div class="status-sub">Free 1v1 video chat with free gender filter and free country filter. No registration required.</div>
 
       <div class="filter-row">
         <div class="filter-group">
           <label>Your gender</label>
           <select id="myGender">
-            <option value="any">Prefer not to say</option>
             <option value="male">Male</option>
             <option value="female">Female</option>
+            <option value="couples">Couples</option>
           </select>
         </div>
         <div class="filter-group">
@@ -445,6 +467,7 @@
             <option value="any">Anyone</option>
             <option value="male">Males</option>
             <option value="female">Females</option>
+            <option value="couples">Couples</option>
           </select>
         </div>
         <div class="filter-group">
@@ -484,6 +507,20 @@
   </div>
 </main>
 
+<button class="feedback-float" onclick="openFeedback()">💬 Feedback</button>
+<div class="feedback-modal" id="feedbackModal">
+  <div class="feedback-box">
+    <h3>Contact Admin</h3>
+    <input id="fbName" placeholder="Your name (optional)">
+    <input id="fbEmail" placeholder="Your email (optional)">
+    <textarea id="fbMessage" rows="4" placeholder="Tell us the problem…"></textarea>
+    <div class="feedback-actions">
+      <button class="btn btn-secondary" onclick="closeFeedback()">Cancel</button>
+      <button class="btn btn-primary" onclick="sendFeedback()">Send</button>
+    </div>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script>
 // ── Country list ─────────────────────────────────────────────────────────
@@ -520,6 +557,8 @@ let peerConn = null;
 let micMuted = false;
 let camOff = false;
 let currentSessionId = null;
+let tempRandomLeft = 0;
+let searchHintTimer = null;
 let myRole = null; // 'caller' or 'callee'
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -698,18 +737,30 @@ async function startChat() {
 
 function findMatch() {
   clearChat();
+  const useRandom = tempRandomLeft > 0;
+  if (useRandom) tempRandomLeft -= 1;
   socket.emit('find_match', {
     gender: document.getElementById('myGender').value,
     country: document.getElementById('myCountry').value,
-    filterGender: document.getElementById('filterGender').value,
-    filterCountry: document.getElementById('filterCountry').value
+    filterGender: useRandom ? 'any' : document.getElementById('filterGender').value,
+    filterCountry: useRandom ? 'any' : document.getElementById('filterCountry').value
   });
 }
 
-function skipChat() {
+function findRandomTwo() {
+  tempRandomLeft = 2;
+  closePeer();
+  findMatch();
+}
+
+function findNext() {
   closePeer();
   clearChat();
   findMatch();
+}
+
+function skipChat() {
+  findNext();
 }
 
 function stopChat() {
@@ -725,19 +776,27 @@ function showOverlay(mode) {
   const overlay = document.getElementById('statusOverlay');
   overlay.classList.remove('hidden');
 
+  clearTimeout(searchHintTimer);
   if (mode === 'searching') {
     overlay.innerHTML = `
       <div class="spinner"></div>
       <div class="status-title" style="font-size:1.4rem">Searching…</div>
-      <div class="status-sub">Looking for a stranger matching your filters</div>
-      <button class="btn btn-secondary" onclick="stopChat()">Cancel</button>
+      <div class="status-sub" id="searchSub">Looking for a stranger matching your filters</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+        <button class="btn btn-primary" onclick="findRandomTwo()">Find Random</button>
+        <button class="btn btn-secondary" onclick="stopChat()">Cancel</button>
+      </div>
     `;
+    searchHintTimer = setTimeout(() => {
+      const sub = document.getElementById('searchSub');
+      if (sub) sub.textContent = 'Finding with filters may take time. Use Find Random to remove filters for the next two connections.';
+    }, 6500);
   } else if (mode === 'disconnected') {
     overlay.innerHTML = `
       <div class="status-title" style="font-size:1.4rem">Stranger left</div>
       <div class="status-sub">The other person disconnected.</div>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-primary" onclick="findMatch();hideOverlay()">Find Next</button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+        <button class="btn btn-primary" onclick="findNext()">Find Next</button>
         <button class="btn btn-secondary" onclick="stopChat()">Stop</button>
       </div>
     `;
@@ -748,6 +807,7 @@ function showOverlay(mode) {
 }
 
 function hideOverlay() {
+  clearTimeout(searchHintTimer);
   document.getElementById('statusOverlay').classList.add('hidden');
 }
 
@@ -791,6 +851,28 @@ function showToast(msg, duration = 4000) {
   t.className = 'toast'; t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), duration);
+}
+
+function openFeedback(){ document.getElementById('feedbackModal').style.display='flex'; }
+function closeFeedback(){ document.getElementById('feedbackModal').style.display='none'; }
+async function sendFeedback(){
+  const message = document.getElementById('fbMessage').value.trim();
+  if (!message) return showToast('Please write the problem first.');
+  try {
+    const res = await fetch('/api/feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      name: document.getElementById('fbName').value,
+      email: document.getElementById('fbEmail').value,
+      message, path: location.pathname
+    })});
+    if (!res.ok) throw new Error('failed');
+    closeFeedback();
+    document.getElementById('fbMessage').value='';
+    showToast('Feedback sent to admin.');
+  } catch(e){ showToast('Could not send feedback. Try again later.'); }
+}
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 }
 </script>
 </body>

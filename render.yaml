@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: chatlink
+    name: kineticcam
     env: node
     buildCommand: npm install
     startCommand: npm start
@@ -11,6 +11,8 @@ services:
       - key: ADMIN_USERNAME
         sync: false
       - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_SECRET
         generateValue: true

@@ -1,0 +1,15 @@
+{
+  "name": "KineticCam - Free 1v1 Video Chat",
+  "short_name": "KineticCam",
+  "description": "Free 1v1 video chat with free gender filter and country filter.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#6c63ff",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

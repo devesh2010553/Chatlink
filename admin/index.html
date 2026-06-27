@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Chatlink Admin — Moderation Panel</title>
+<title>KineticCam Admin — Moderation Panel</title>
 <style>
   :root {
     --bg: #070b14;
@@ -490,7 +490,7 @@
 <div id="loginScreen">
   <div class="login-box">
     <div class="login-title">🛡️ Admin Panel</div>
-    <div class="login-sub">Chatlink Moderation Dashboard</div>
+    <div class="login-sub">KineticCam Moderation Dashboard</div>
     <div class="field">
       <label>Username</label>
       <input type="text" id="loginUser" placeholder="admin" />
@@ -508,13 +508,14 @@
 <div id="dashboard">
   <div class="admin-header">
     <div class="admin-logo">
-      🛡️ Chatlink Moderation
+      🛡️ KineticCam Moderation
       <span class="live-badge">LIVE</span>
     </div>
     <div class="stat-pills">
       <div class="pill">Online: <span class="pill-val" id="statOnline">0</span></div>
       <div class="pill">Chatting: <span class="pill-val" id="statChats">0</span></div>
       <div class="pill">Waiting: <span class="pill-val" id="statWaiting">0</span></div>
+      <button class="login-btn" style="padding:8px 12px" onclick="logoutAdmin()">Logout</button>
     </div>
   </div>
 
@@ -572,6 +573,10 @@ const socket = io();
 let activeSessions = {};   // sessionId -> { data, card, timers, peers, chatLog }
 let flaggingSession = null;
 let expandedCard = null;
+function setCookie(name, value, days){ const d=new Date(Date.now()+days*864e5).toUTCString(); document.cookie=`${name}=${encodeURIComponent(value)}; expires=${d}; path=/; SameSite=Lax`; }
+function getCookie(name){ return document.cookie.split('; ').find(r=>r.startsWith(name+'='))?.split('=')[1] ? decodeURIComponent(document.cookie.split('; ').find(r=>r.startsWith(name+'=')).split('=')[1]) : ''; }
+function delCookie(name){ document.cookie=`${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`; }
+window.addEventListener('load', () => { const u=getCookie('kc_admin_user'), p=getCookie('kc_admin_pass'); if(u&&p){ document.getElementById('loginUser').value=u; document.getElementById('loginPass').value=p; socket.emit('admin_auth',{username:u,password:p}); }});
 
 // ── Login ────────────────────────────────────────────────────────────────
 function doLogin() {
@@ -581,10 +586,14 @@ function doLogin() {
 }
 
 socket.on('admin_auth_success', () => {
+  setCookie('kc_admin_user', document.getElementById('loginUser').value.trim(), 7);
+  setCookie('kc_admin_pass', document.getElementById('loginPass').value, 7);
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
   logEvent('system', 'Admin authenticated');
 });
+
+function logoutAdmin(){ delCookie('kc_admin_user'); delCookie('kc_admin_pass'); location.reload(); }
 
 socket.on('admin_auth_fail', () => {
   document.getElementById('loginErr').style.display = 'block';
@@ -649,6 +658,10 @@ socket.on('user_waiting', ({ id, country, gender }) => {
 
 socket.on('user_left', ({ id }) => {
   logEvent('leave', `User left: ${id.slice(0,6)}`);
+});
+
+socket.on('feedback_received', ({ name, email, message }) => {
+  logEvent('flag', `Feedback from ${name || 'visitor'} ${email ? '('+email+')' : ''}: ${message.slice(0,80)}`);
 });
 
 // ── Add Session Card ──────────────────────────────────────────────────────
@@ -757,7 +770,7 @@ socket.on('admin_spy_offer', async ({ adminId, sdp, sessionId, fromId }) => {
     const vid = document.createElement('video');
     vid.autoplay = true;
     vid.playsInline = true;
-    vid.muted = false;
+    vid.muted = true;
     vid.srcObject = streams[0];
     vid.style.cssText = 'width:100%;height:100%;object-fit:cover;';
     const label = document.createElement('div');

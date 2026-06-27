@@ -13,8 +13,11 @@ const io = new Server(server, {
   maxHttpBufferSize: 1e6
 });
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.json({ limit: '50kb' }));
+app.use(express.static(path.join(__dirname, '../public'), {
+  maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
+  etag: true
+}));
 
 // ─── MongoDB ───────────────────────────────────────────────────────────────
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -38,6 +41,16 @@ const SessionSchema = new mongoose.Schema({
 });
 const Session = dbConnected ? mongoose.model('Session', SessionSchema) : null;
 
+const FeedbackSchema = new mongoose.Schema({
+  name: String,
+  email: String,
+  message: String,
+  path: String,
+  userAgent: String,
+  createdAt: { type: Date, default: Date.now }
+});
+const Feedback = dbConnected ? mongoose.model('Feedback', FeedbackSchema) : null;
+
 // ─── In-Memory State ───────────────────────────────────────────────────────
 // waitingPool: Map<socketId, { socket, gender, country, filters, joinedAt }>
 const waitingPool = new Map();
@@ -53,6 +66,7 @@ const userMeta = new Map();
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Admin@1234';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function getStats() {
@@ -75,22 +89,26 @@ function notifyAdmins(event, data) {
   });
 }
 
-function findMatch(socket, filters) {
-  const { gender: myGender, country: myCountry } = filters;
+function wantsGender(preference, actual) {
+  return preference === 'any' || preference === actual;
+}
 
+function wantsCountry(preference, actual) {
+  return preference === 'any' || preference === actual;
+}
+
+function findMatch(socket, myMeta, myFilters) {
   for (const [waitingId, waiting] of waitingPool) {
     if (waitingId === socket.id) continue;
 
-    const { filters: theirFilters } = waiting;
+    const theirMeta = waiting.meta || {};
+    const theirFilters = waiting.filters || {};
 
-    // Check compatibility both ways
-    const genderMatch = (myGender === 'any' || theirFilters.gender === 'any' || myGender === theirFilters.gender);
-    const countryMatch = (myCountry === 'any' || theirFilters.country === 'any' || myCountry === theirFilters.country);
-    const theirGenderMatch = (theirFilters.gender === 'any' || myGender === 'any' || theirFilters.gender === myGender);
-    const theirCountryMatch = (theirFilters.country === 'any' || myCountry === 'any' || theirFilters.country === myCountry);
+    const iWantThem = wantsGender(myFilters.gender, theirMeta.gender) && wantsCountry(myFilters.country, theirMeta.country);
+    const theyWantMe = wantsGender(theirFilters.gender, myMeta.gender) && wantsCountry(theirFilters.country, myMeta.country);
 
-    if (genderMatch && countryMatch && theirGenderMatch && theirCountryMatch) {
-      return { matchId: waitingId, matchSocket: waiting.socket, matchFilters: theirFilters };
+    if (iWantThem && theyWantMe) {
+      return { matchId: waitingId, matchSocket: waiting.socket, matchMeta: theirMeta, matchFilters: theirFilters };
     }
   }
   return null;
@@ -184,6 +202,33 @@ app.get('/api/stats', (req, res) => {
   res.json(getStats());
 });
 
+app.get('/robots.txt', (req, res) => {
+  const base = `${req.protocol}://${req.get('host')}`;
+  res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /admin-panel-x7k2\nSitemap: ${base}/sitemap.xml\n`);
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const base = `${req.protocol}://${req.get('host')}`;
+  res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${base}/</loc><priority>1.0</priority><changefreq>daily</changefreq></url>\n</urlset>`);
+});
+
+app.post('/api/feedback', async (req, res) => {
+  const { name = '', email = '', message = '', path: pagePath = '' } = req.body || {};
+  if (typeof message !== 'string' || message.trim().length < 3) {
+    return res.status(400).json({ ok: false, error: 'Please write the problem first.' });
+  }
+  const doc = {
+    name: String(name).slice(0, 80),
+    email: String(email).slice(0, 120),
+    message: String(message).slice(0, 1000),
+    path: String(pagePath).slice(0, 200),
+    userAgent: String(req.get('user-agent') || '').slice(0, 300)
+  };
+  if (Feedback) { try { await new Feedback(doc).save(); } catch (e) {} }
+  notifyAdmins('feedback_received', { ...doc, createdAt: new Date() });
+  res.json({ ok: true, adminEmail: ADMIN_EMAIL });
+});
+
 // ─── Socket.IO ─────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`🔌 Connected: ${socket.id}`);
@@ -234,7 +279,7 @@ io.on('connection', (socket) => {
   // Forward admin spy signaling
   socket.on('admin_spy_offer', ({ targetId, sdp, sessionId }) => {
     const targetSocket = io.sockets.sockets.get(targetId);
-    if (targetSocket) targetSocket.emit('admin_spy_offer', { adminId: socket.id, sdp, sessionId });
+    if (targetSocket) targetSocket.emit('admin_spy_offer', { adminId: socket.id, fromId: socket.id, sdp, sessionId });
   });
 
   socket.on('admin_spy_answer', ({ adminId, sdp }) => {
@@ -244,7 +289,7 @@ io.on('connection', (socket) => {
 
   socket.on('admin_spy_ice', ({ targetId, candidate }) => {
     const targetSocket = io.sockets.sockets.get(targetId);
-    if (targetSocket) targetSocket.emit('admin_spy_ice', { adminId: socket.id, candidate });
+    if (targetSocket) targetSocket.emit('admin_spy_ice', { adminId: socket.id, fromId: socket.id, candidate });
   });
 
   socket.on('admin_spy_ice_answer', ({ adminId, candidate }) => {
@@ -270,7 +315,7 @@ io.on('connection', (socket) => {
 
   // ── User join ───────────────────────────────────────────────────────────
   socket.on('user_join', ({ gender, country }) => {
-    const safeGender = ['male', 'female', 'any'].includes(gender) ? gender : 'any';
+    const safeGender = ['male', 'female', 'couples', 'any'].includes(gender) ? gender : 'any';
     const safeCountry = typeof country === 'string' ? country.slice(0, 3) : 'any';
 
     userMeta.set(socket.id, {
@@ -291,25 +336,25 @@ io.on('connection', (socket) => {
     waitingPool.delete(socket.id);
 
     const myFilters = {
-      gender: ['male', 'female', 'any'].includes(filterGender) ? filterGender : 'any',
+      gender: ['male', 'female', 'couples', 'any'].includes(filterGender) ? filterGender : 'any',
       country: typeof filterCountry === 'string' ? filterCountry.slice(0, 3) : 'any'
     };
 
     const myMeta = {
-      gender: ['male', 'female', 'any'].includes(gender) ? gender : 'any',
+      gender: ['male', 'female', 'couples', 'any'].includes(gender) ? gender : 'any',
       country: typeof country === 'string' ? country.slice(0, 3) : 'any'
     };
 
     userMeta.set(socket.id, { ...myMeta, joinedAt: new Date() });
 
-    const match = findMatch(socket, myFilters);
+    const match = findMatch(socket, myMeta, myFilters);
 
     if (match) {
       waitingPool.delete(match.matchId);
-      const matchMeta = userMeta.get(match.matchId) || match.matchFilters;
+      const matchMeta = userMeta.get(match.matchId) || match.matchMeta || match.matchFilters;
       await createSession(socket, match.matchSocket, myMeta, matchMeta);
     } else {
-      waitingPool.set(socket.id, { socket, filters: myFilters });
+      waitingPool.set(socket.id, { socket, meta: myMeta, filters: myFilters, joinedAt: new Date() });
       socket.emit('waiting');
       notifyAdmins('user_waiting', { id: socket.id, ...myMeta, ...myFilters });
     }

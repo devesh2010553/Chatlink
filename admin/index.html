@@ -482,6 +482,11 @@
   .scrollbar-thin::-webkit-scrollbar { width: 4px; }
   .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
   .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .feedback-panel{border-top:1px solid var(--border);background:var(--surface);max-height:36vh;display:flex;flex-direction:column}
+  .feedback-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:700}
+  .feedback-list{overflow:auto;padding:10px;display:grid;gap:8px}
+  .fb-item{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px;display:grid;gap:5px;font-family:Arial,sans-serif}
+  .fb-meta{color:var(--muted);font-size:.72rem}.fb-msg{font-size:.82rem;line-height:1.35;white-space:pre-wrap}.fb-del{justify-self:end;background:var(--red);color:white;border:0;border-radius:7px;padding:5px 8px;cursor:pointer;font-size:.72rem}
 </style>
 </head>
 <body>
@@ -528,6 +533,10 @@
       </div>
       <div class="sidebar-section">Event Log</div>
       <div class="event-log scrollbar-thin" id="eventLog"></div>
+      <div class="feedback-panel">
+        <div class="feedback-head"><span>Feedback</span><button class="login-btn" style="padding:5px 8px;font-size:.7rem" onclick="loadFeedbacks()">Refresh</button></div>
+        <div class="feedback-list scrollbar-thin" id="feedbackList"><div style="color:var(--muted);font-size:.78rem">No feedback loaded</div></div>
+      </div>
     </div>
 
     <!-- Main -->
@@ -586,6 +595,7 @@ function doLogin() {
 }
 
 socket.on('admin_auth_success', () => {
+  setTimeout(loadFeedbacks, 300);
   setCookie('kc_admin_user', document.getElementById('loginUser').value.trim(), 7);
   setCookie('kc_admin_pass', document.getElementById('loginPass').value, 7);
   document.getElementById('loginScreen').style.display = 'none';
@@ -661,8 +671,27 @@ socket.on('user_left', ({ id }) => {
 });
 
 socket.on('feedback_received', ({ name, email, message }) => {
-  logEvent('flag', `Feedback from ${name || 'visitor'} ${email ? '('+email+')' : ''}: ${message.slice(0,80)}`);
+  logEvent('flag', `Feedback from ${name || 'visitor'} ${email ? '('+email+')' : ''}: ${String(message||'').slice(0,80)}`);
+  loadFeedbacks();
 });
+socket.on('feedback_deleted', () => loadFeedbacks());
+
+// ── Feedback Storage ─────────────────────────────────────────────────────
+function adminHeaders(){ return { 'x-admin-user': getCookie('kc_admin_user'), 'x-admin-pass': getCookie('kc_admin_pass') }; }
+async function loadFeedbacks(){
+  const box=document.getElementById('feedbackList'); if(!box) return;
+  try{
+    const r=await fetch('/api/admin/feedback',{headers:adminHeaders()});
+    const data=await r.json(); if(!data.ok) throw new Error('auth');
+    if(!data.items.length){ box.innerHTML='<div style="color:var(--muted);font-size:.78rem">No feedback yet</div>'; return; }
+    box.innerHTML=data.items.map(f=>`<div class="fb-item"><div class="fb-meta">${escHtml(f.name||'Visitor')} ${f.email?(' • '+escHtml(f.email)):''}</div><div class="fb-msg">${escHtml(f.message||'')}</div><div class="fb-meta">${new Date(f.createdAt).toLocaleString()} • ${escHtml(f.path||'/')}</div><button class="fb-del" onclick="deleteFeedback('${String(f._id)}')">Delete</button></div>`).join('');
+  }catch(e){ box.innerHTML='<div style="color:var(--red);font-size:.78rem">Could not load feedback. Login again.</div>'; }
+}
+async function deleteFeedback(id){
+  if(!confirm('Delete this feedback?')) return;
+  await fetch('/api/admin/feedback/'+encodeURIComponent(id),{method:'DELETE',headers:adminHeaders()});
+  loadFeedbacks();
+}
 
 // ── Add Session Card ──────────────────────────────────────────────────────
 function addSession(data) {

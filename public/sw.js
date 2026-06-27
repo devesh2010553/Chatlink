@@ -1,5 +1,5 @@
 const CACHE_NAME = 'kineticcam-v1';
-const ASSETS = ['/', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.jpeg'];
+const ASSETS = ['/', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 self.addEventListener('install', event => {
   self.skipWaiting();
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS).catch(() => {})));

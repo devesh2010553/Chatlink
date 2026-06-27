@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: chatlink
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
